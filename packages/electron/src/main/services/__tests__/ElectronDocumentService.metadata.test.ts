@@ -22,8 +22,14 @@ describe('ElectronDocumentService - Metadata Cache', () => {
 
   async function createTestFile(filename: string, content: string): Promise<string> {
     const filePath = path.join(tempDir, filename);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content);
     return filePath;
+  }
+
+  async function makeGitRepo(dirPath: string): Promise<void> {
+    await fs.mkdir(path.join(dirPath, '.git'), { recursive: true });
+    await fs.writeFile(path.join(dirPath, '.git', 'HEAD'), 'ref: refs/heads/main\n');
   }
 
   describe('metadata extraction', () => {
@@ -265,6 +271,43 @@ planStatus:
       expect(planMeta.frontmatter.planStatus).toBeTruthy();
       expect(planMeta.tags).toEqual(['planning', 'metadata']);
       expect(planMeta.summary).toBe('This is a plan summary');
+    });
+
+    it('should ignore documents inside nested git repos', async () => {
+      await createTestFile('plans/local-plan.md', `---
+planStatus:
+  title: Local Plan
+  status: draft
+---
+
+# Local plan`);
+
+      const nestedRepo = path.join(tempDir, 'nimbalyst-local', 'nimbalyst');
+      await makeGitRepo(nestedRepo);
+      await fs.mkdir(path.join(nestedRepo, 'design', 'Collaboration'), { recursive: true });
+      await fs.writeFile(
+        path.join(nestedRepo, 'design', 'Collaboration', 'shared-file-viewer.md'),
+        `---
+planStatus:
+  title: Foreign Plan
+  status: draft
+---
+
+# Foreign plan`
+      );
+
+      service = new ElectronDocumentService(tempDir);
+      await service.refreshWorkspaceData();
+
+      const metadata = await service.listDocumentMetadata();
+      expect(metadata.map(entry => entry.path)).toEqual(['plans/local-plan.md']);
+
+      const documents = await service.listDocuments();
+      expect(documents.map(entry => entry.path).sort()).toEqual([
+        'nimbalyst-local',
+        'plans',
+        'plans/local-plan.md',
+      ]);
     });
   });
 });

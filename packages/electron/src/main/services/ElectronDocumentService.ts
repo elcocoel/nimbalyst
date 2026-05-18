@@ -432,6 +432,19 @@ export class ElectronDocumentService implements DocumentService {
   // Number of fs operations between event loop yields during async scan
   private static readonly YIELD_INTERVAL = 100;
 
+  private async isNestedGitRepoRoot(fullPath: string, depth: number): Promise<boolean> {
+    if (depth === 0) {
+      return false;
+    }
+
+    try {
+      await fs.stat(path.join(fullPath, '.git'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async scanDirectoryAsync(
     dirPath: string,
     basePath: string = '',
@@ -526,6 +539,13 @@ export class ElectronDocumentService implements DocumentService {
           const stats = await fs.stat(fullPath);
 
           if (stats.isDirectory()) {
+            // Treat nested git repos as foreign workspaces. Scanning into them
+            // pollutes the parent workspace with unrelated docs, plans, and
+            // tracker frontmatter from vendored or copied projects.
+            if (await this.isNestedGitRepoRoot(fullPath, depth + 1)) {
+              continue;
+            }
+
             // Use centralized directory exclusion logic (worktrees, node_modules, .git, etc.)
             if (shouldExcludeDir(item)) {
               continue;
